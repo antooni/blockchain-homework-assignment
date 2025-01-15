@@ -70,7 +70,14 @@ We use snap sync to quickly download the latest blockchain state without the ful
 To do it, go to `./linea` and use `docker compose up -d`.
 
 Use `docker logs linea-node-1` to view the logs. Once the node logs `Imported new chain segment` it should be catching up and ready to query.
-You don't need to wait for the node to catch up to the latest block, instead we are ok to query the data that is already present in the archival snapshot.
+With the snap sync method, the node has to complete the download to let us properly query the blockchain.
+
+You can view the docker logs to see the progress. It logs the synced status and the ETA.
+For example:
+
+```
+INFO [01-15|17:14:45.081] Syncing: chain download in progress      synced=3.27%   chain=151.87MiB headers=305,152@82.02MiB bodies=271,587@61.44MiB receipts=271,587@8.42MiB eta=47m45.166s
+```
 
 To see the latest available block, you may use the following query:
 
