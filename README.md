@@ -8,7 +8,7 @@ We expect you to complete this task in your own time. All required software can 
 Please keep the code readable and add comments where relevant. If you encounter any issues, feel free to be creative or contact us for help. If you make any assumptions, please note them in the comments.
 
 We don't expect you to spend more than 2-3 hours of active time on this task. Please note that syncing the node may take a while, depending on your internet speed. Start the node well before you begin working on the task to avoid waiting for the node to boot up.
-TODO: Sami, test how it syncs on your machine.
+With my mac, it took about 30 minutes to sync the node.
 
 You can keep the solutions as simple as possible, and it's okay if you don't have time to complete the entire task. We understand it can be intense.
 
