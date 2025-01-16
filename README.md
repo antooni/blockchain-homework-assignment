@@ -27,7 +27,7 @@ You can keep the solutions as simple as possible, and it's okay if you don't hav
    2. transactions
 
 2. Analytics
-   1. Contract metrics
+   1. Standardized transaction model & QA
 
 ## Steps:
 
