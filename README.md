@@ -3,12 +3,13 @@
 In this task, you will implement a simplified version of the Token Terminal ELT process.
 This assignment assumes some knowledge of blockchain, but no in-depth knowledge of the scraped data is required.
 
+**Note on AI Usage**: We assume and encourage you to use AI coding assistants (GitHub Copilot, ChatGPT, Claude, etc.) to help you complete this assignment. This reflects modern development practices. We're interested in your ability to architect solutions, make technical decisions, and understand the systems you build—not just your ability to write code from scratch.
+
 We expect you to complete this task in your own time. All required software can be used free of charge.
 
 Please keep the code readable and add comments where relevant. If you encounter any issues, feel free to be creative or contact us for help. If you make any assumptions, please note them in the comments.
 
-We don't expect you to spend more than 2-3 hours of active time on this task. Please note that syncing the node may take a while, depending on your internet speed. Start the node well before you begin working on the task to avoid waiting for the node to boot up.
-With my mac, it took about 30 minutes to sync the node.
+We don't expect you to spend more than 2-3 hours of active time on this task.
 
 You can keep the solutions as simple as possible, and it's okay if you don't have time to complete the entire task. We understand it can be intense.
 
@@ -18,6 +19,21 @@ You can keep the solutions as simple as possible, and it's okay if you don't hav
 2. Develop the indexer and commit the code.
 3. Write SQL queries or create table/view commands and save them into one or more SQL files, which you should commit to the repository.
 4. Push the code to GitHub. If you prefer to keep the repository private, invite `jamo` as a reader, or alternatively, send it as a zip file.
+
+## Blockchain RPC Options
+
+You have **flexibility in choosing your blockchain and RPC endpoint**:
+
+### Option 1: Anvil
+We provide an Anvil-based local RPC node that starts instantly and supports standard `eth_*` JSON-RPC methods.
+
+### Option 2: Your Own Chain/RPC
+Alternatively, you can:
+- Run your own blockchain node (Ethereum mainnet, Polygon, Arbitrum, etc.)
+- Use public RPC endpoints (Infura, Alchemy, QuickNode, etc.)
+- Use any EVM-compatible chain with standard JSON-RPC methods
+
+**Please document which chain/RPC you chose in your submission.**
 
 ## Goals:
 
@@ -51,66 +67,64 @@ When writing SQL, please keep the following key points in mind:
 
 - Linux or Mac. This has not been tested on Windows, but it might still work.
 - Docker, which we assume you have installed already.
-- Nodejs/typescript, you can use nvm or brew to install.
-- Clickhouse: no installation required; see below for the single step to get the binary.
+- Nodejs/typescript/go
+- PostgreSQL: runs in Docker (see docker-compose.yml)
 
-### 1. Running the Blockchain Node
+### 1. Running the Blockchain Node (Optional - Anvil)
 
-For this task, we'll set up and run the Linea Sepolia node. The node is a generic `geth` node (geth is a classic EVM node client), and their testnet Sepolia is nice and small.
-This allows us to dive into the data quickly without massive disk space requirements.
+**Note**: This step is optional if you're using a public RPC endpoint or your own node.
 
-You should have ~100GB of free disk space for this task.
-
-In this repo, we have provided a ready-made `docker-compose` file for running the node. This is rarely the case, but the goal is not to test your ability to Google arbitrary configuration flags.
+For this task, we provide a ready-made Anvil setup in `./anvil/`. It starts instantly and exposes JSON-RPC on `http://localhost:8545`.
 
 #### Setting up the node
 
-We use snap sync to quickly download the latest blockchain state without the full history. This method is efficient and reduces time and storage needs. Not using archival mode further optimizes the process for querying recent data.
+To do it, go to `./anvil` and run `docker-compose up -d`.
 
-To do it, go to `./linea` and use `docker compose up -d`.
+#### RPC Endpoint
 
-Use `docker logs linea-node-1` to view the logs. Once the node logs `Imported new chain segment` it should be catching up and ready to query.
-With the snap sync method, the node has to complete the download to let us properly query the blockchain.
+Connect your indexer to: `http://localhost:8545`
 
-You can view the docker logs to see the progress. It logs the synced status and the ETA.
-For example:
-
-```
-INFO [01-15|17:14:45.081] Syncing: chain download in progress      synced=3.27%   chain=151.87MiB headers=305,152@82.02MiB bodies=271,587@61.44MiB receipts=271,587@8.42MiB eta=47m45.166s
+Configure your indexer with your preferred pattern (environment variables, a config file, CLI flags, etc.). For example:
+```bash
+RPC_URL=http://localhost:8545
 ```
 
 To see the latest available block, you may use the following query:
 
-```
+```bash
 curl 127.0.0.1:8545 -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0", "method": "eth_getBlockByNumber", "params": ["latest", false], "id": "x"}' | jq .
 ```
 
 To get the block number in plain text:
 
-```
+```bash
 curl 127.0.0.1:8545 -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0", "method": "eth_getBlockByNumber", "params": ["latest", false], "id": "x"}' | jq .result.number -r | xargs printf "%d\n"
 ```
 
-When updating this task, the latest block is 8 297 638.
-
-For more information on running Linea, see their docs: https://docs.linea.build/developers/guides/run-a-node/use-docker. Note that we are using the `geth` client in this task.
-
 ### 2. Implementing the Indexer
 
-In this phase, we will write code to extract blockchain data and prepare it for loading into our data warehouse. We will use the [JSON RPC API](https://openethereum.github.io/JSONRPC-eth-module) provided by the blockchain node for data indexing.
+In this phase, you will write code to extract blockchain data and prepare it for loading into PostgreSQL. You will use the [JSON RPC API](https://openethereum.github.io/JSONRPC-eth-module) provided by the blockchain node for data indexing.
 
-Create a program that uses `START` and `COUNT` parameters from the environment to scrape data from `START` to `START+COUNT`. The program should generate one or more files for loading into Clickhouse. For simplicity, we recommend you to use the json-newline format.
+When indexing a live chain, a common approach is to follow the finalized chain tip instead of blindly tracking `latest`.
+- Prefer querying `eth_getBlockByNumber` with `finalized` (or `safe`) to decide the upper bound.
+- If you choose to index close to head, keep a confirmation buffer and implement a reorg strategy.
 
-This repository includes helpful functions and example schemas to assist you. We have provided convenience functions to facilitate interaction with the blockchain.
+**The `indexer/` directory is provided as a placeholder - you need to initialize and implement the indexer from scratch.** See `indexer/README.md` for setup instructions for TypeScript or Go.
 
-Following the ELT approach, we aim to minimize data transformations during loading. However, two transformations are necessary for ease of use. Further data manipulation can occur in the data warehouse.
+Your program should:
+- Extract blockchain data (blocks, transactions, receipts) via JSON-RPC
+- Store the data in PostgreSQL with proper schema design
+- Handle errors and edge cases gracefully
 
-- Convert blockNumber and timestamp to a human-readable format and include them in all data entries (receipts, traces).
-- [Optional] Extract transactions into a separate file for simplicity. However the proviced SQL examples assume you've done it.
+Following the ELT approach, we aim to minimize data transformations during loading. However, consider these for ease of use:
 
-For this task, scrape approximately last couple of weeks of data.
+- Convert blockNumber and timestamp to human-readable formats
+- Store transactions separately from blocks for easier querying
+- Design your schema to support efficient queries
 
-Below are the relevant JSON RPC methods and their documentation links. You may not need to consult the documentation to complete this task.
+For this task, scrape approximately the last couple of weeks of data.
+
+Below are the relevant JSON RPC methods and their documentation links:
 
 - Blocks
   - `eth_getBlockByNumber`
@@ -121,47 +135,46 @@ Below are the relevant JSON RPC methods and their documentation links. You may n
   - [Documentation](https://www.quicknode.com/docs/ethereum/eth_getBlockReceipts)
   - This method returns transaction receipts, which need to be linked to transactions for analytics purposes, following the ELT workflow.
 
-Tips:
+### 3. Loading Data into PostgreSQL
 
-- To simplify the workflow, save the files in the Clickhouse `user_files` directory: `db/user_files`.
+#### Setting Up PostgreSQL
 
-### 3. Loading Data into Clickhouse
+We use PostgreSQL for this task due to its battle-tested reliability, excellent support for indexes, and widespread industry adoption.
 
-#### Setting Up Clickhouse Locally
+PostgreSQL runs in Docker using the provided `docker-compose.yml` in the root directory:
 
-Setting up Clickhouse is straightforward, which is why we use it for this task.
+```bash
+# Start PostgreSQL (and Redis if needed)
+docker-compose up -d postgres
 
-Run the clickhouse related commands in the `./db` folder.
+# Check it's running
+docker-compose ps
 
-Get the latest binary:
-
-```
-curl https://clickhouse.com/ | sh
-```
-
-And start up the clickhouse local server:
-
-```
-./clickhouse server
+# Connect to PostgreSQL
+psql postgresql://indexer:indexer_password@localhost:5432/indexer
 ```
 
-Leave this running in its own terminal tab.
+#### Initialize the Database
 
-#### Test the Clickhouse cli connection
+A minimal schema setup is provided in `./sql/00_init.sql` - it only creates the `raw` schema.
 
-`./clickhouse client`
+```bash
+psql postgresql://indexer:indexer_password@localhost:5432/indexer -f sql/00_init.sql
+```
 
-#### Load data
+#### Design Your Schema
 
-To make loading the data easier, we have provided example queries to create the `blocks`, `transactions`, `receipts` tables. You can use these as a starting point.
-Depending on your implementation, you might have transactiosn data nested in the blocks, or in a separate file.
+You need to create tables for:
+- `raw.blocks` - Block-level blockchain data
+- `raw.transactions` - Individual transaction data
+- `raw.receipts` - Transaction receipt data with execution results
 
-See `./sql` folder for examples of the schema and import queries.
-
-These assume you have saved the data with similar modifications, so you may need to make minor edits.
-
-You can use clickhouse to infer the schema from the files: e.g., `describe table file('./blocks_*') FORMAT JSONCompactEachRow;`
-Note: The path for `file` is relative to the `./db/user_files`
+Consider:
+- **Primary keys** on natural identifiers (block_number, transaction hash)
+- **Indexes** on columns used for queries and joins (timestamps, addresses, block numbers)
+- **Data types** suitable for blockchain data (BIGINT/NUMERIC for large numbers, JSONB for nested structures)
+- **Idempotent inserts** using `ON CONFLICT DO NOTHING`
+- **Performance** via batch inserts and connection pooling
 
 ### 4. Analytics
 
@@ -190,11 +203,16 @@ After the above steps, you have the following raw tables are available in the da
    - Implement checks for:
      - Continuous block sequence (no gaps)
      - Complete data for specified date range
-     - Expected number of transactions per block
-   - Save queries in a separate SQL file (e.g., `qa_checks.sql`)
+     - Orphaned transactions and missing receipts
+     - Null value checks on critical fields
+   - Save queries in a SQL file (e.g., `qa_checks.sql`)
 
 #### Expected Deliverables
 
-- SQL files following the naming convention: `0003_transactions.sql`, `0004_qa_checks.sql`
+- SQL files for schema creation, data model, and QA checks
+- Follow naming convention: `01_schema.sql`, `02_transactions.sql` etc.
 - Each file should be self-contained and documented
 - Include any assumptions made in SQL comments
+- Document your indexing strategy and why you chose specific indexes
+- Document which blockchain/RPC endpoint you used
+- Note any AI tools used and how they helped
