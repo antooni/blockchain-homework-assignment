@@ -14,13 +14,13 @@ This directory contains a Docker setup for running [Anvil](https://book.getfound
 
 ```bash
 # Start Anvil
-docker-compose up -d
+docker compose up -d
 
 # View logs
 docker logs -f anvil
 
 # Stop Anvil
-docker-compose down
+docker compose down
 ```
 
 ## Test the Node
@@ -58,6 +58,7 @@ Private Key: 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
 This folder uses a single `docker-compose.yml`.
 
 By default it runs Anvil with:
+
 - A forked chain (upstream RPC configured in `docker-compose.yml`)
 - A fast block time (configured in `docker-compose.yml`)
 
@@ -93,6 +94,7 @@ Edit `docker-compose.yml` to customize:
 Connect your indexer to: `http://localhost:8545`
 
 Set in environment variables:
+
 ```bash
 RPC_URL=http://localhost:8545
 ```
@@ -100,6 +102,7 @@ RPC_URL=http://localhost:8545
 ## Troubleshooting
 
 **Port already in use:**
+
 ```bash
 # Change port in docker-compose.yml
 ports:
@@ -107,6 +110,7 @@ ports:
 ```
 
 **Fork failing:**
+
 ```bash
 # Check upstream RPC is accessible
 curl https://eth.llamarpc.com

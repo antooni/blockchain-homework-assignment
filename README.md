@@ -35,36 +35,42 @@ The system must handle:
 You have **flexibility in choosing your blockchain and RPC endpoint**:
 
 ### Option 1: Anvil
+
 We provide a ready-to-use Anvil setup in `anvil/`:
+
 ```bash
 cd anvil
-docker-compose up -d
+docker compose up -d
 # RPC available at http://localhost:8545
 ```
 
 ### Option 2: Your Own Chain/RPC
+
 Alternatively, you can:
-- Run your own blockchain node (Ethereum, Polygon, Arbitrum, etc.)
+
+- Run your own EVM blockchain node (Ethereum, Polygon, Arbitrum, etc.)
 - Use public RPC endpoints (Infura, Alchemy, QuickNode, etc.)
 - Use any EVM-compatible chain with `eth_*` JSON-RPC methods
 
 **Required RPC Methods:**
+
 - `eth_blockNumber` - Get latest block
 - `eth_getBlockByNumber` - Get block with transactions
 - `eth_getBlockReceipts` - Get transaction receipts
 
 To reduce reorg complexity, a common approach is to follow the finalized (or safe) chain tip instead of indexing directly at `latest`.
+
 - Prefer `eth_getBlockByNumber` with `finalized` (or `safe`) as the upper bound.
 - If you choose to index near the tip, keep a confirmation buffer and implement a reorg strategy.
 
 ## What We Provide
 
-| Component | Description |
-|-----------|-------------|
-| `docker-compose.yml` | Redis and PostgreSQL services |
-| `anvil/docker-compose.yml` | Optional local Anvil RPC node setup |
-| `sql/00_init.sql` | Minimal PostgreSQL setup (schema creation only) |
-| `indexer/README.md` | Setup instructions for TypeScript or Go |
+| Component                  | Description                                     |
+| -------------------------- | ----------------------------------------------- |
+| `docker-compose.yml`       | Redis and PostgreSQL services                   |
+| `anvil/docker-compose.yml` | Optional local Anvil RPC node setup             |
+| `sql/00_init.sql`          | Minimal PostgreSQL setup (schema creation only) |
+| `indexer/README.md`        | Setup instructions for TypeScript or Go         |
 
 ## What You Implement
 
@@ -75,11 +81,13 @@ Create a distributed indexer application (TypeScript or Go) that:
 Coordinate block range assignments across multiple scraper instances.
 
 **Goal:**
+
 - Avoid duplicate work across instances
 - Support parallelism across multiple workers
 - Make progress observable and resumable
 
 **Common approaches:**
+
 - Redis-backed queue/stream
 - Leader assigns ranges, workers lease ranges
 - Any other coordination method you can explain and justify
@@ -89,9 +97,11 @@ Coordinate block range assignments across multiple scraper instances.
 Respect the RPC endpoint's global rate limit across all instances.
 
 **Goal:**
+
 - Ensure the combined traffic from all workers stays within the RPC provider's limits
 
 **Notes:**
+
 - As a starting point, assume a global budget of roughly **50 requests/second** across all workers.
 - How you coordinate this is up to you (Redis token bucket, per-worker budgets, centralized scheduler, etc.).
 
@@ -100,9 +110,11 @@ Respect the RPC endpoint's global rate limit across all instances.
 Handle transient failures gracefully.
 
 **Goal:**
+
 - Recover from transient failures (timeouts, 429s, temporary RPC issues) without losing work
 
 **Notes:**
+
 - Exponential backoff with jitter is a common approach.
 - Decide your own retry limits and failure handling based on your architecture.
 
@@ -111,6 +123,7 @@ Handle transient failures gracefully.
 Support resuming after restart.
 
 **Goal:**
+
 - Restarting workers should not require starting the entire indexing job from scratch
 - The system should converge to completion even if workers crash
 
@@ -119,6 +132,7 @@ Support resuming after restart.
 Design and implement PostgreSQL schema for blockchain data.
 
 **Goal:**
+
 - Create tables for blocks, transactions, and receipts with appropriate:
   - Primary keys and unique constraints
   - Data types (consider numeric precision for large numbers, JSONB for nested data)
@@ -132,6 +146,7 @@ Design and implement PostgreSQL schema for blockchain data.
 Your scraper should be configurable. You may choose your own configuration pattern (environment variables, a config file, CLI flags, etc.).
 
 Common configuration inputs include:
+
 ```bash
 REDIS_URL=redis://localhost:6379
 RPC_URL=http://localhost:8545              # Your chosen RPC endpoint
@@ -148,7 +163,7 @@ WORKER_ID=worker-1                         # Unique identifier for this instance
 # cp .env.example .env
 
 # Start infrastructure
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Deliverables
@@ -160,12 +175,12 @@ docker-compose up -d
 
 ## Evaluation Criteria
 
-| Area | Weight | Description |
-|------|--------|-------------|
-| **Correctness** | 40% | All blocks scraped, no duplicates, data integrity |
-| **Coordination** | 30% | Work distribution, rate limiting, progress tracking work correctly |
-| **Fault Tolerance** | 20% | Handles failures gracefully, can resume after restart |
-| **Code Quality** | 10% | Clean, readable, well-structured code |
+| Area                | Weight | Description                                                        |
+| ------------------- | ------ | ------------------------------------------------------------------ |
+| **Correctness**     | 40%    | All blocks scraped, no duplicates, data integrity                  |
+| **Coordination**    | 30%    | Work distribution, rate limiting, progress tracking work correctly |
+| **Fault Tolerance** | 20%    | Handles failures gracefully, can resume after restart              |
+| **Code Quality**    | 10%    | Clean, readable, well-structured code                              |
 
 ## Time Expectation
 
@@ -174,11 +189,13 @@ This assignment is designed to take **3-4 hours** for the happy path implementat
 ## Hints
 
 **Coordination:**
+
 - Redis `BLMOVE` (or `BRPOPLPUSH` for older Redis) is useful for atomic queue operations
 - Consider using Redis `SET` with `NX` and `EX` options for distributed locking
 - Sliding window rate limiting can be implemented with Redis sorted sets
 
 **Database Design:**
+
 - PostgreSQL supports `INSERT ... ON CONFLICT DO NOTHING` for idempotent inserts
 - Index columns used in WHERE clauses, JOIN conditions, and ORDER BY
 - B-tree indexes work well for numeric and timestamp columns

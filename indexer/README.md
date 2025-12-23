@@ -7,6 +7,7 @@ This directory is where you'll implement your blockchain indexer.
 You may use either **TypeScript** or **Go** for your implementation. Both are commonly used for blockchain infrastructure:
 
 ### TypeScript Setup
+
 ```bash
 npm init -y
 npm install --save-dev typescript @types/node tsx
@@ -15,6 +16,7 @@ npx tsc --init
 ```
 
 ### Go Setup
+
 ```bash
 go mod init indexer
 go get github.com/redis/go-redis/v9
