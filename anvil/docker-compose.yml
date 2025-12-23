@@ -1,0 +1,13 @@
+services:
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:stable@sha256:043752653d5be351c71709091b3db97c4421c907eb40ea294195e7f532aadf46
+    container_name: anvil
+    ports:
+      - "8545:8545"
+    restart: unless-stopped
+    entrypoint:
+      - anvil
+    command:
+      - --host=0.0.0.0
+      - --fork-url=${ANVIL_FORK_URL:-https://reth-ethereum.ithaca.xyz/rpc}
+      - --block-time=2
