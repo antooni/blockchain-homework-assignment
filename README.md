@@ -1,218 +1,191 @@
 # Token Terminal Blockchain Indexing Task
 
-In this task, you will implement a simplified version of the Token Terminal ELT process.
-This assignment assumes some knowledge of blockchain, but no in-depth knowledge of the scraped data is required.
+In this task, you will build a distributed blockchain indexing system where multiple scraper instances coordinate to extract block data from a shared RPC endpoint.
 
-**Note on AI Usage**: We assume and encourage you to use AI coding assistants (GitHub Copilot, ChatGPT, Claude, etc.) to help you complete this assignment. This reflects modern development practices. We're interested in your ability to architect solutions, make technical decisions, and understand the systems you build—not just your ability to write code from scratch.
+**Note on AI Usage**: We assume and encourage you to use AI coding assistants (GitHub Copilot, ChatGPT, Claude, etc.) to help you complete this assignment. This reflects modern development practices. Focus on understanding the system design and being able to explain your architectural decisions.
 
-We expect you to complete this task in your own time. All required software can be used free of charge.
+The system must handle:
+- **Work distribution** across multiple instances
+- **Rate limiting** to respect RPC endpoint limits
+- **Fault tolerance** with retries and progress persistence
+- **Coordination** via Redis
 
-Please keep the code readable and add comments where relevant. If you encounter any issues, feel free to be creative or contact us for help. If you make any assumptions, please note them in the comments.
+## Architecture
 
-We don't expect you to spend more than 2-3 hours of active time on this task.
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Scraper 1  │     │  Scraper 2  │     │  Scraper N  │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+        │                   │                   │
+        └───────────┬───────┴───────────┬───────┘
+                    │                   │
+             ┌──────▼──────┐     ┌──────▼──────┐
+             │    Redis    │     │   RPC Node  │
+             │ Coordination│     │ (rate-limited)
+             └─────────────┘     └─────────────┘
+                    │
+             ┌──────▼──────┐
+             │ PostgreSQL  │
+             │   Storage   │
+             └─────────────┘
+```
 
-You can keep the solutions as simple as possible, and it's okay if you don't have time to complete the entire task. We understand it can be intense.
-
-## Instructions
-
-1. Fork this repository or create a private clone of it.
-2. Develop the indexer and commit the code.
-3. Write SQL queries or create table/view commands and save them into one or more SQL files, which you should commit to the repository.
-4. Push the code to GitHub. If you prefer to keep the repository private, invite `jamo` as a reader, or alternatively, send it as a zip file.
-
-## Blockchain RPC Options
+## Blockchain RPC Endpoint
 
 You have **flexibility in choosing your blockchain and RPC endpoint**:
 
 ### Option 1: Anvil
-We provide an Anvil-based local RPC node that starts instantly and supports standard `eth_*` JSON-RPC methods.
+We provide a ready-to-use Anvil setup in `anvil/`:
+```bash
+cd anvil
+docker-compose up -d
+# RPC available at http://localhost:8545
+```
 
 ### Option 2: Your Own Chain/RPC
 Alternatively, you can:
-- Run your own blockchain node (Ethereum mainnet, Polygon, Arbitrum, etc.)
+- Run your own blockchain node (Ethereum, Polygon, Arbitrum, etc.)
 - Use public RPC endpoints (Infura, Alchemy, QuickNode, etc.)
-- Use any EVM-compatible chain with standard JSON-RPC methods
+- Use any EVM-compatible chain with `eth_*` JSON-RPC methods
 
-**Please document which chain/RPC you chose in your submission.**
+**Required RPC Methods:**
+- `eth_blockNumber` - Get latest block
+- `eth_getBlockByNumber` - Get block with transactions
+- `eth_getBlockReceipts` - Get transaction receipts
 
-## Goals:
+To reduce reorg complexity, a common approach is to follow the finalized (or safe) chain tip instead of indexing directly at `latest`.
+- Prefer `eth_getBlockByNumber` with `finalized` (or `safe`) as the upper bound.
+- If you choose to index near the tip, keep a confirmation buffer and implement a reorg strategy.
 
-1. Build a dataset in our data warehouse with two tables:
+## What We Provide
 
-   1. blocks
-   2. transactions
+| Component | Description |
+|-----------|-------------|
+| `docker-compose.yml` | Redis and PostgreSQL services |
+| `anvil/docker-compose.yml` | Optional local Anvil RPC node setup |
+| `sql/00_init.sql` | Minimal PostgreSQL setup (schema creation only) |
+| `indexer/README.md` | Setup instructions for TypeScript or Go |
 
-2. Analytics
-   1. Standardized transaction model & QA
+## What You Implement
 
-## Steps:
+Create a distributed indexer application (TypeScript or Go) that:
 
-1. Set up a blockchain node.
-2. Implement a lightweight, simple indexer to extract raw data from the chain.
-3. Load the data into the data warehouse.
-4. Implement the data model and a Trending contracts dataset.
+### 1. Work Distribution
 
-#### SQL Style Guide
+Coordinate block range assignments across multiple scraper instances.
 
-When writing SQL, please keep the following key points in mind:
+**Goal:**
+- Avoid duplicate work across instances
+- Support parallelism across multiple workers
+- Make progress observable and resumable
 
-1. Keep the SQL readable. Avoid short table names and acronyms.
-   - Don't use `from raw.blocks as b`, but use `blocks` as the table name.
-2. Use CTEs over subqueries. CTEs keep the SQL readable; only use subqueries when absolutely necessary.
-3. We use dbt to manage dependencies, but to avoid scope creep, we won't install and set up dbt here.
-   - Save a couple of SQL queries as tables, or create the required views and tables manually.
-   - Use numbers in the filenames to describe the file dependencies, e.g., `0001_init_tables.sql`, `0002_blocks.sql`, and so on.
+**Common approaches:**
+- Redis-backed queue/stream
+- Leader assigns ranges, workers lease ranges
+- Any other coordination method you can explain and justify
 
-#### System Requirements
+### 2. Distributed Rate Limiting
 
-- Linux or Mac. This has not been tested on Windows, but it might still work.
-- Docker, which we assume you have installed already.
-- Nodejs/typescript/go
-- PostgreSQL: runs in Docker (see docker-compose.yml)
+Respect the RPC endpoint's global rate limit across all instances.
 
-### 1. Running the Blockchain Node (Optional - Anvil)
+**Goal:**
+- Ensure the combined traffic from all workers stays within the RPC provider's limits
 
-**Note**: This step is optional if you're using a public RPC endpoint or your own node.
+**Notes:**
+- As a starting point, assume a global budget of roughly **50 requests/second** across all workers.
+- How you coordinate this is up to you (Redis token bucket, per-worker budgets, centralized scheduler, etc.).
 
-For this task, we provide a ready-made Anvil setup in `./anvil/`. It starts instantly and exposes JSON-RPC on `http://localhost:8545`.
+### 3. Retry with Backoff
 
-#### Setting up the node
+Handle transient failures gracefully.
 
-To do it, go to `./anvil` and run `docker-compose up -d`.
+**Goal:**
+- Recover from transient failures (timeouts, 429s, temporary RPC issues) without losing work
 
-#### RPC Endpoint
+**Notes:**
+- Exponential backoff with jitter is a common approach.
+- Decide your own retry limits and failure handling based on your architecture.
 
-Connect your indexer to: `http://localhost:8545`
+### 4. Progress Persistence
 
-Configure your indexer with your preferred pattern (environment variables, a config file, CLI flags, etc.). For example:
+Support resuming after restart.
+
+**Goal:**
+- Restarting workers should not require starting the entire indexing job from scratch
+- The system should converge to completion even if workers crash
+
+### 5. Data Output & Schema Design
+
+Design and implement PostgreSQL schema for blockchain data.
+
+**Goal:**
+- Create tables for blocks, transactions, and receipts with appropriate:
+  - Primary keys and unique constraints
+  - Data types (consider numeric precision for large numbers, JSONB for nested data)
+  - Indexes on columns used in queries and joins
+- Ensure idempotent inserts (use `ON CONFLICT DO NOTHING` or similar)
+- Consider batch inserts for efficiency (multi-row INSERT or COPY)
+- Document your schema design choices
+
+## Configuration
+
+Your scraper should be configurable. You may choose your own configuration pattern (environment variables, a config file, CLI flags, etc.).
+
+Common configuration inputs include:
 ```bash
-RPC_URL=http://localhost:8545
+REDIS_URL=redis://localhost:6379
+RPC_URL=http://localhost:8545              # Your chosen RPC endpoint
+POSTGRES_URL=postgresql://indexer:indexer_password@localhost:5432/indexer
+BATCH_SIZE=100                             # Blocks per work unit
+RATE_LIMIT=50                              # Requests per second (global)
+WORKER_ID=worker-1                         # Unique identifier for this instance
 ```
 
-To see the latest available block, you may use the following query:
+## Getting Started
 
 ```bash
-curl 127.0.0.1:8545 -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0", "method": "eth_getBlockByNumber", "params": ["latest", false], "id": "x"}' | jq .
+# Optional: customize local credentials/config
+# cp .env.example .env
+
+# Start infrastructure
+docker-compose up -d
 ```
 
-To get the block number in plain text:
+## Deliverables
 
-```bash
-curl 127.0.0.1:8545 -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0", "method": "eth_getBlockByNumber", "params": ["latest", false], "id": "x"}' | jq .result.number -r | xargs printf "%d\n"
-```
+1. **Source code** in `indexer/` implementing the scraper
+2. **Brief documentation** explaining your approach (in code comments or a short APPROACH.md)
+3. **RPC endpoint documentation** - Note which chain/RPC you used and any setup instructions
+4. **Be prepared to discuss** failure scenarios and tradeoffs in the follow-up interview
 
-### 2. Implementing the Indexer
+## Evaluation Criteria
 
-In this phase, you will write code to extract blockchain data and prepare it for loading into PostgreSQL. You will use the [JSON RPC API](https://openethereum.github.io/JSONRPC-eth-module) provided by the blockchain node for data indexing.
+| Area | Weight | Description |
+|------|--------|-------------|
+| **Correctness** | 40% | All blocks scraped, no duplicates, data integrity |
+| **Coordination** | 30% | Work distribution, rate limiting, progress tracking work correctly |
+| **Fault Tolerance** | 20% | Handles failures gracefully, can resume after restart |
+| **Code Quality** | 10% | Clean, readable, well-structured code |
 
-When indexing a live chain, a common approach is to follow the finalized chain tip instead of blindly tracking `latest`.
-- Prefer querying `eth_getBlockByNumber` with `finalized` (or `safe`) to decide the upper bound.
-- If you choose to index close to head, keep a confirmation buffer and implement a reorg strategy.
+## Time Expectation
 
-**The `indexer/` directory is provided as a placeholder - you need to initialize and implement the indexer from scratch.** See `indexer/README.md` for setup instructions for TypeScript or Go.
+This assignment is designed to take **3-4 hours** for the happy path implementation. Focus on getting the core functionality working correctly rather than over-engineering edge cases.
 
-Your program should:
-- Extract blockchain data (blocks, transactions, receipts) via JSON-RPC
-- Store the data in PostgreSQL with proper schema design
-- Handle errors and edge cases gracefully
+## Hints
 
-Following the ELT approach, we aim to minimize data transformations during loading. However, consider these for ease of use:
+**Coordination:**
+- Redis `BLMOVE` (or `BRPOPLPUSH` for older Redis) is useful for atomic queue operations
+- Consider using Redis `SET` with `NX` and `EX` options for distributed locking
+- Sliding window rate limiting can be implemented with Redis sorted sets
 
-- Convert blockNumber and timestamp to human-readable formats
-- Store transactions separately from blocks for easier querying
-- Design your schema to support efficient queries
+**Database Design:**
+- PostgreSQL supports `INSERT ... ON CONFLICT DO NOTHING` for idempotent inserts
+- Index columns used in WHERE clauses, JOIN conditions, and ORDER BY
+- B-tree indexes work well for numeric and timestamp columns
+- JSONB type and GIN indexes are useful for nested data like logs
+- Consider using BIGINT or NUMERIC for large blockchain numbers
+- Connection pooling improves performance with concurrent workers
 
-For this task, scrape approximately the last couple of weeks of data.
+## Questions?
 
-Below are the relevant JSON RPC methods and their documentation links:
-
-- Blocks
-  - `eth_getBlockByNumber`
-  - [Documentation](https://openethereum.github.io/JSONRPC-eth-module#eth_getblockbynumber)
-  - This method can also return full transaction data if the second parameter is set to true. We used this query to verify the node's status.
-- Transaction Receipts
-  - `eth_getBlockReceipts`
-  - [Documentation](https://www.quicknode.com/docs/ethereum/eth_getBlockReceipts)
-  - This method returns transaction receipts, which need to be linked to transactions for analytics purposes, following the ELT workflow.
-
-### 3. Loading Data into PostgreSQL
-
-#### Setting Up PostgreSQL
-
-We use PostgreSQL for this task due to its battle-tested reliability, excellent support for indexes, and widespread industry adoption.
-
-PostgreSQL runs in Docker using the provided `docker-compose.yml` in the root directory:
-
-```bash
-# Start PostgreSQL (and Redis if needed)
-docker-compose up -d postgres
-
-# Check it's running
-docker-compose ps
-
-# Connect to PostgreSQL
-psql postgresql://indexer:indexer_password@localhost:5432/indexer
-```
-
-#### Initialize the Database
-
-A minimal schema setup is provided in `./sql/00_init.sql` - it only creates the `raw` schema.
-
-```bash
-psql postgresql://indexer:indexer_password@localhost:5432/indexer -f sql/00_init.sql
-```
-
-#### Design Your Schema
-
-You need to create tables for:
-- `raw.blocks` - Block-level blockchain data
-- `raw.transactions` - Individual transaction data
-- `raw.receipts` - Transaction receipt data with execution results
-
-Consider:
-- **Primary keys** on natural identifiers (block_number, transaction hash)
-- **Indexes** on columns used for queries and joins (timestamps, addresses, block numbers)
-- **Data types** suitable for blockchain data (BIGINT/NUMERIC for large numbers, JSONB for nested structures)
-- **Idempotent inserts** using `ON CONFLICT DO NOTHING`
-- **Performance** via batch inserts and connection pooling
-
-### 4. Analytics
-
-#### Available Data Sources
-
-After the above steps, you have the following raw tables are available in the data warehouse:
-
-- `raw.blocks` - Contains block-level blockchain data
-- `raw.transactions` - Contains individual transaction data unnested from inside the raw blocks.
-- `raw.receipts` - Contains transaction receipt data with execution results
-
-#### Tasks
-
-1. **Transaction Analytics Model**
-
-   - Create `transactions.sql` that combines data from the raw tables
-   - Model should enable calculation of:
-     - Transaction fees
-     - Number of active users (transaction senders)
-     - Fee paid to an underlying L1 blockchain
-   - Save as a view or materialized table
-   - Follow the SQL style guide outlined above
-
-2. **Data Quality Validation**
-   - Create a QA model to verify data completeness
-   - Implement checks for:
-     - Continuous block sequence (no gaps)
-     - Complete data for specified date range
-     - Orphaned transactions and missing receipts
-     - Null value checks on critical fields
-   - Save queries in a SQL file (e.g., `qa_checks.sql`)
-
-#### Expected Deliverables
-
-- SQL files for schema creation, data model, and QA checks
-- Follow naming convention: `01_schema.sql`, `02_transactions.sql` etc.
-- Each file should be self-contained and documented
-- Include any assumptions made in SQL comments
-- Document your indexing strategy and why you chose specific indexes
-- Document which blockchain/RPC endpoint you used
-- Note any AI tools used and how they helped
+If anything is unclear, please reach out. We want to evaluate your distributed systems skills, not your ability to guess requirements.

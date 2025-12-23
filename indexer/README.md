@@ -24,7 +24,7 @@ go get github.com/lib/pq
 ## Getting Started
 
 1. Initialize your project using one of the setups above
-2. Implement the distributed indexer according to the specifications in `ASSIGNMENT_README.md`
+2. Implement the distributed indexer according to the specifications in the main `README.md`
 3. Connect to the provided services:
    - Redis: `localhost:6379`
    - PostgreSQL: `localhost:5432`
@@ -39,4 +39,4 @@ go get github.com/lib/pq
 - Data output to PostgreSQL with proper schema design
 - Gap detection and recovery
 
-Refer to `ASSIGNMENT_README.md` for detailed requirements.
+Refer to the main `README.md` for detailed requirements.
