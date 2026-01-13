@@ -131,7 +131,5 @@ If count >= limit, rejects request.
 
 ## Progress Persistence
 
-### Database as source of truth
-- on full system restart, the Redis queue preserves the order
-- block is only considered "done" when committed to PostgreSQL
-- out of homework scope: if Redis data is lost (worst case), a "Startup Reconciliation" script would query Postgres (MAX(block)) to re-seed the queue from the last checkpoint, it should also look for the gaps in data
+- happy path: on system restart, the Redis queue preserves the order
+- disaster path (out of homework scope): if Redis data is lost, a "Startup Reconciliation" script would query Postgres (MAX(block)) to re-seed the queue from the last checkpoint, it should also look for the gaps in data. Assumption is that it would be run on edge cases so this is fine the gap-finding query could potentially take longer time.
