@@ -42,7 +42,7 @@ export async function saveBlockBatch(
         )
         SELECT * FROM UNNEST(
           $1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[],
-          $6::timestamptz[], -- CHANGED: numeric[] -> timestamptz[]
+          $6::timestamptz[],
           $7::text[], $8::text[], $9::numeric[],
           $10::numeric[], $11::numeric[], $12::numeric[], $13::numeric[],
           $14::text[], $15::text[], $16::text[], $17::text[]
@@ -59,7 +59,6 @@ export async function saveBlockBatch(
           batch.map((b) => b.parent_hash),
           batch.map((b) => b.nonce),
           batch.map((b) => b.sha3_uncles),
-          // FIX: Convert Unix seconds to JS Date (milliseconds)
           batch.map((b) => new Date(Number(b.timestamp) * 1000)),
           batch.map((b) => b.miner),
           batch.map((b) => b.extra_data),
