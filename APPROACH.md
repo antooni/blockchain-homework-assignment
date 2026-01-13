@@ -19,6 +19,14 @@
 
 ---
 
+## Reorg handling
+
+- system will not handle reorgs 
+- use `finalized` block number as upper bound
+  - block becomes finalized after 2 epochs (~12.8 minutes), it cannot be reverted unless 1/3 of all staked ETH is slashed (billions of dollars burned)
+
+---
+
 ## Database performance considerations
 
 ### Critical DB operation: batch insert
@@ -41,21 +49,28 @@
 Schema is available at ./sql folder
 
 ### RPC calls return types
-- https://www.quicknode.com/docs/ethereum/eth_getBlockByNumber
-- https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-- https://www.quicknode.com/docs/ethereum/eth_getBlockReceipts
+- [eth_getBlockByNumber](https://www.quicknode.com/docs/ethereum/eth_getBlockByNumber)
+- [eth_getTransactionByHash](https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash)
+- [eth_getBlockReceipts](https://www.quicknode.com/docs/ethereum/eth_getBlockReceipts)
+
+### Chain
+- do not specify chain, assume whole table is for Ethereum
+
+### Timestamps
+- use `TIMESTAMPTZ` for better analytics and human readability
 
 ### Hashes
 - use `TEXT` although `BYTEA` would be more space efficient it would introduce complexity (debugging, decoding)
 
-### Values
+### Values (Quantity)
 - use `NUMERIC(78,0)` - it will fit EVM's 2^256 values, for simplicity all bigints will be stored using the same precision
 
 ### Nested data types
 - normalized schema over JSONB because Topics are fundamental query keys in Ethereum, and B-Tree indexes on specific columns offer better performance than GIN indexes on nested JSON arrays
 
 ### Cascade deletes
-- would be needed for re-org handling, in the homework scope we skip it althogether
+- although there is no support for re-ord handling it is still handy to have it for manual interventions
+- logs have two delete paths, Postgres handles redundant deletes efficiently
 
 ### Pending blocks/transactions
 - it is possible that some fields would be set to `null` but we skip it in homework scope
@@ -120,11 +135,3 @@ If count >= limit, rejects request.
 - on full system restart, the Redis queue preserves the order
 - block is only considered "done" when committed to PostgreSQL
 - out of homework scope: if Redis data is lost (worst case), a "Startup Reconciliation" script would query Postgres (MAX(block)) to re-seed the queue from the last checkpoint, it should also look for the gaps in data
-
----
-
-## Reorg handling
-
-- system will not handle reorgs 
-- use `finalized` block number as upper bound
-  - block becomes finalized after 2 epochs (~12.8 minutes), it cannot be reverted unless 1/3 of all staked ETH is slashed (billions of dollars burned)
