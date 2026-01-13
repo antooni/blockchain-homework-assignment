@@ -4,7 +4,6 @@ CREATE TABLE blocks (
     hash              TEXT NOT NULL UNIQUE,   -- "hash"
     parent_hash       TEXT NOT NULL,          -- "parentHash"
     nonce             TEXT NOT NULL,          -- "nonce" (Guaranteed defined for mined blocks)
-    mix_hash          TEXT NOT NULL,          -- "mixHash"
     sha3_uncles       TEXT NOT NULL,          -- "sha3Uncles"
 
     -- 2. Metadata & Time
@@ -23,8 +22,5 @@ CREATE TABLE blocks (
     state_root        TEXT NOT NULL,          -- "stateRoot"
     receipts_root     TEXT NOT NULL,          -- "receiptsRoot"
     transactions_root TEXT NOT NULL,          -- "transactionsRoot"
-    logs_bloom        TEXT NOT NULL,          -- "logsBloom"
-
-    -- 5. Arrays
-    uncles            TEXT[]                 -- "uncles" (Stored as array of strings)
+    logs_bloom        TEXT NOT NULL          -- "logsBloom"
 );

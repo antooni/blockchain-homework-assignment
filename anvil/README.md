@@ -36,7 +36,7 @@ curl -X POST http://localhost:8545 \
 # Get block details
 curl -X POST http://localhost:8545 \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest",false],"id":1}' | jq
+  -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest",true],"id":1}' | jq
 ```
 
 ## Pre-funded Test Accounts
