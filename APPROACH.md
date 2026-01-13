@@ -127,4 +127,4 @@ If count >= limit, rejects request.
 
 - system will not handle reorgs 
 - use `finalized` block number as upper bound
-- block becomes finalized after 2 epochs (~12.8 minutes), it cannot be reverted unless 1/3 of all staked ETH is slashed (billions of dollars burned)
+  - block becomes finalized after 2 epochs (~12.8 minutes), it cannot be reverted unless 1/3 of all staked ETH is slashed (billions of dollars burned)
