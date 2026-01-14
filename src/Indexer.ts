@@ -6,18 +6,19 @@ import type { BlockRecord, LogRecord, TransactionRecord } from './types'
 
 export class Indexer {
   private isRunning = false
-  private readonly MAX_RETRIES = 5
-  private readonly CONCURRENCY = 20
 
   constructor(
     private database: Database,
     private fetcher: Fetcher,
     private queue: Queue,
+    private options: {
+      id: string
+      maxBlocksToProcessAtOnce: number
+    },
   ) {}
 
   async start() {
     this.isRunning = true
-    console.log(`👷 Worker started. Batch fetching concurrency: ${this.CONCURRENCY}`)
 
     while (this.isRunning) {
       let currentRange: [bigint, bigint] | null = null
@@ -27,7 +28,7 @@ export class Indexer {
         currentRange = await this.queue.next()
         const [from, to] = currentRange
 
-        console.log(`🔄 Processing batch: ${from}-${to}`)
+        console.log(`[${this.options.id}] 🔄 Processing batch: ${from}-${to}`)
 
         // 2. Heartbeat (Keep lease alive while we download/save)
         const heartbeat = setInterval(() => {
@@ -40,11 +41,11 @@ export class Indexer {
         // 4. Ack
         clearInterval(heartbeat)
         await this.queue.complete(from, to)
-        console.log(`✅ Completed batch: ${from}-${to}`)
+        console.log(`[${this.options.id}] ✅ Completed batch: ${from}-${to}`)
       } catch (error) {
         if (currentRange) {
           const [from, to] = currentRange
-          console.error(`💥 Failed batch ${from}-${to}:`, error)
+          console.error(`[${this.options.id}] 💥 Failed batch ${from}-${to}:`, error)
           await this.queue.fail(from, to)
         }
         await sleep(2000)
@@ -53,7 +54,7 @@ export class Indexer {
   }
 
   async processRange(from: bigint, to: bigint) {
-    const limit = pLimit(this.CONCURRENCY)
+    const limit = pLimit(this.options.maxBlocksToProcessAtOnce)
     const tasks: Promise<
       | {
           blockRecord: BlockRecord
@@ -84,28 +85,11 @@ export class Indexer {
   }
 
   /**
-   * Helper: Fetches and Transforms a SINGLE block with Retry Logic.
-   * We keep retry logic here so one network blip doesn't fail the whole batch of 50 immediately.
+   * Helper: Fetches and Transforms a SINGLE block.
+   * Retry logic is handled by the Fetcher.
    */
   private async fetchAndTransform(blockNum: bigint) {
-    let attempt = 0
-    while (attempt < this.MAX_RETRIES) {
-      try {
-        attempt++
-        // A. Fetch
-        return await this.fetcher.fetch(blockNum)
-        // B. Transform
-      } catch {
-        // If it's the last attempt, throw to fail the Promise.all()
-        if (attempt >= this.MAX_RETRIES) {
-          throw new Error(`Block ${blockNum} failed after ${this.MAX_RETRIES} attempts`)
-        }
-
-        // Backoff (Sleep is needed here to recover from Rate Limits/Timeouts)
-        const delay = Math.pow(2, attempt) * 500 + Math.floor(Math.random() * 500)
-        await sleep(delay)
-      }
-    }
+    return await this.fetcher.fetch(blockNum)
   }
 
   stop() {

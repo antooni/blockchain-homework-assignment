@@ -3,13 +3,13 @@ import type { Queue } from './Queue'
 import type { BlockRecord, GetBlockReceiptsSchema, LogRecord, TransactionRecord } from './types'
 
 export class Fetcher {
-  // Rate Limit Configuration
-  private readonly RPS_LIMIT = 50 // Max requests per second
-  private readonly WINDOW_MS = 1000
-
   constructor(
     private client: Client,
     private queue: Queue, // Injected for Rate Limiting
+    private options: {
+      rpcCallsPerSecond: number
+      maxRetries: number
+    },
   ) {}
 
   /**
@@ -20,7 +20,7 @@ export class Fetcher {
     let allowed = false
     while (!allowed) {
       // Ask Redis: "Can I make 1 call?"
-      allowed = await this.queue.acquireToken(this.RPS_LIMIT, this.WINDOW_MS)
+      allowed = await this.queue.acquireToken(this.options.rpcCallsPerSecond)
       if (!allowed) {
         // If rejected, sleep for a random short interval (jitter) to desynchronize
         const jitter = Math.floor(Math.random() * 200) + 50
@@ -29,7 +29,33 @@ export class Fetcher {
     }
   }
 
+  /**
+   * Fetches and transforms a single block with retry logic.
+   * Retries handle transient network errors without failing the entire batch.
+   */
   async fetch(blockNumber: bigint) {
+    let attempt = 0
+    while (attempt < this.options.maxRetries) {
+      try {
+        attempt++
+        return await this.fetchInternal(blockNumber)
+      } catch {
+        // If it's the last attempt, throw to propagate the error
+        if (attempt >= this.options.maxRetries) {
+          throw new Error(`Block ${blockNumber} failed after ${this.options.maxRetries} attempts`)
+        }
+
+        // Exponential backoff with jitter to recover from rate limits/timeouts
+        const delay = Math.pow(2, attempt) * 500 + Math.floor(Math.random() * 500)
+        await sleep(delay)
+      }
+    }
+  }
+
+  /**
+   * Internal fetch implementation without retry logic.
+   */
+  private async fetchInternal(blockNumber: bigint) {
     const hexNumber = toHex(blockNumber)
 
     // 1. Prepare Tasks with Rate Limiting

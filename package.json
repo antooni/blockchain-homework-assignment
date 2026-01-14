@@ -4,7 +4,9 @@
   "description": "In this task, you will build a distributed blockchain indexing system where multiple scraper instances coordinate to extract block data from a shared RPC endpoint.",
   "main": "index.js",
   "scripts": {
-    "start": "tsx --env-file=.env src/index.ts",
+    "build": "tsc",
+    "start": "node --env-file=.env dist/index.js",
+    "dev": "tsx --env-file=.env src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check --formatter-enabled=false .",
     "lint:fix": "biome check --formatter-enabled=false --write .",
