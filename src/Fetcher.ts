@@ -1,24 +1,63 @@
 import { type Block, type Client, type Transaction, type TransactionReceipt, toHex } from 'viem'
+import type { Queue } from './Queue'
 import type { BlockRecord, GetBlockReceiptsSchema, LogRecord, TransactionRecord } from './types'
 
 export class Fetcher {
-  constructor(private client: Client) {}
+  // Rate Limit Configuration
+  private readonly RPS_LIMIT = 50 // Max requests per second
+  private readonly WINDOW_MS = 1000
+
+  constructor(
+    private client: Client,
+    private queue: Queue, // Injected for Rate Limiting
+  ) {}
+
+  /**
+   * Helper: Spins until a Rate Limit token is acquired.
+   * This handles the "Backoff" logic for the Rate Limiter specifically.
+   */
+  private async waitForToken() {
+    let allowed = false
+    while (!allowed) {
+      // Ask Redis: "Can I make 1 call?"
+      allowed = await this.queue.acquireToken(this.RPS_LIMIT, this.WINDOW_MS)
+      if (!allowed) {
+        // If rejected, sleep for a random short interval (jitter) to desynchronize
+        const jitter = Math.floor(Math.random() * 200) + 50
+        await sleep(jitter)
+      }
+    }
+  }
 
   async fetch(blockNumber: bigint) {
-    const [block, receipts] = await Promise.all([
-      this.client.request({
-        method: 'eth_getBlockByNumber',
-        params: [toHex(blockNumber), true],
-      }) as Promise<Block>,
+    const hexNumber = toHex(blockNumber)
 
-      this.client.request<GetBlockReceiptsSchema>({
+    // 1. Prepare Tasks with Rate Limiting
+    // We wrap the request in a function that first ensures we have a token.
+    // This allows Promise.all to execute them as soon as tokens are available.
+
+    const blockTask = (async () => {
+      await this.waitForToken() // Cost: 1 call
+      return this.client.request({
+        method: 'eth_getBlockByNumber',
+        params: [hexNumber, true],
+      }) as Promise<Block>
+    })()
+
+    const receiptsTask = (async () => {
+      await this.waitForToken() // Cost: 1 call
+      return this.client.request<GetBlockReceiptsSchema>({
         method: 'eth_getBlockReceipts',
-        params: [toHex(blockNumber)],
-      }) as Promise<TransactionReceipt[]>,
-    ])
+        params: [hexNumber],
+      }) as Promise<TransactionReceipt[]>
+    })()
+
+    // 2. Execute in Parallel
+    const [block, receipts] = await Promise.all([blockTask, receiptsTask])
 
     if (!block) throw new Error(`Block ${blockNumber} not found`)
 
+    // 3. Transform
     return transformData(block, receipts)
   }
 }
@@ -56,11 +95,15 @@ export function transformData(block: Block, receipts: TransactionReceipt[]) {
   const logRecords: LogRecord[] = []
 
   for (const tx of block.transactions as Transaction[]) {
+    assert(tx.hash && tx.blockHash)
+
     const receipt = receiptMap.get(tx.hash)
     if (!receipt) throw new Error(`Missing receipt for tx ${tx.hash}`)
 
-    const maxFeePerGas = 'maxFeePerGas' in tx ? tx.maxFeePerGas : null
-    const maxPriorityFeePerGas = 'maxPriorityFeePerGas' in tx ? tx.maxPriorityFeePerGas : null
+    // Safe Property Access (Type Guarding)
+    const maxFeePerGas = 'maxFeePerGas' in tx ? (tx.maxFeePerGas ?? null) : null
+    const maxPriorityFeePerGas =
+      'maxPriorityFeePerGas' in tx ? (tx.maxPriorityFeePerGas ?? null) : null
 
     txRecords.push({
       hash: tx.hash,
@@ -72,15 +115,15 @@ export function transformData(block: Block, receipts: TransactionReceipt[]) {
       to_address: tx.to,
       value: bigIntToStr(tx.value),
       gas: bigIntToStr(tx.gas),
-      gas_price: tx.gasPrice?.toString() ?? '0x',
+      gas_price: bigIntToStr(tx.gasPrice ?? 0n),
       input: tx.input,
       v: bigIntToStr(tx.v),
       r: tx.r,
       s: tx.s,
 
       type: tx.type ? Number(tx.type) : 0,
-      max_fee_per_gas: maxFeePerGas?.toString() ?? null,
-      max_priority_fee_per_gas: maxPriorityFeePerGas?.toString() ?? null,
+      max_fee_per_gas: bigIntToStr(maxFeePerGas),
+      max_priority_fee_per_gas: bigIntToStr(maxPriorityFeePerGas),
 
       contract_address: receipt.contractAddress ?? null,
       effective_gas_price: bigIntToStr(receipt.effectiveGasPrice),
@@ -114,4 +157,8 @@ function assert(condition: unknown, message?: string): asserts condition {
   if (!condition) {
     throw new Error(message ? `Assertion Error: ${message}` : 'Assertion Error')
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

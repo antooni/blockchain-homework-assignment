@@ -149,6 +149,12 @@ export class Database {
       client.release()
     }
   }
+
+  async getLatest() {
+    const result = await this.pool.query('SELECT MAX(block_number) from number')
+
+    return result.rows[0] as bigint | undefined
+  }
 }
 
 const chunk = <T>(array: T[], size: number): T[][] => {

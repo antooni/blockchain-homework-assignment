@@ -3,7 +3,6 @@ import { Pool } from 'pg'
 import { createPublicClient, http } from 'viem'
 import { anvil } from 'viem/chains'
 import { Database } from './Database'
-import { Fetcher } from './Fetcher'
 import { Queue } from './Queue'
 
 async function main() {
@@ -23,8 +22,6 @@ async function main() {
     transport: http(),
   })
 
-  const fetcher = new Fetcher(rpcClient)
-
   const redisUrl = process.env.REDIS_URL
   if (redisUrl === undefined) {
     throw new Error('Missing env: REDIS_URL')
@@ -35,11 +32,19 @@ async function main() {
 
   const queue = new Queue(redisClient, redisBlockingClient)
 
-  const tip = 24219023n
+  const tip = await rpcClient.getBlockNumber()
+  const lastProcessed = await database.getLatest()
+  await queue.seed(tip, lastProcessed)
 
-  const { blockRecord, txRecords, logRecords } = await fetcher.fetch(tip)
-
-  await database.save([blockRecord], txRecords, logRecords)
+  setInterval(async () => {
+    try {
+      const tip = await rpcClient.getBlockNumber()
+      const lastProcessed = await database.getLatest()
+      await queue.seed(tip, lastProcessed)
+    } catch (err) {
+      console.error('Seeder failed:', err)
+    }
+  }, 10000)
 
   setInterval(async () => {
     try {
