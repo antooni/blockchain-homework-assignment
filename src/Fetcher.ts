@@ -35,18 +35,27 @@ export class Fetcher {
    */
   async fetch(blockNumber: bigint) {
     let attempt = 0
+    let lastError: unknown
     while (attempt < this.options.maxRetries) {
       try {
         attempt++
         return await this.fetchInternal(blockNumber)
-      } catch {
+      } catch (error) {
+        lastError = error
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.warn(
+          `⚠️ Block ${blockNumber} attempt ${attempt}/${this.options.maxRetries} failed: ${errorMessage}`,
+        )
+
         // If it's the last attempt, throw to propagate the error
         if (attempt >= this.options.maxRetries) {
-          throw new Error(`Block ${blockNumber} failed after ${this.options.maxRetries} attempts`)
+          const finalMessage = `Block ${blockNumber} failed after ${this.options.maxRetries} attempts. Last error: ${errorMessage}`
+          throw new Error(finalMessage)
         }
 
         // Exponential backoff with jitter to recover from rate limits/timeouts
         const delay = Math.pow(2, attempt) * 500 + Math.floor(Math.random() * 500)
+        console.log(`⏳ Block ${blockNumber} retrying in ${delay}ms...`)
         await sleep(delay)
       }
     }
@@ -90,6 +99,8 @@ export class Fetcher {
 
 // biome-ignore lint: we do not handle pending blocks
 const bigIntToStr = (v: bigint | number | null) => v!.toString()
+const bigIntToStrOrNull = (v: bigint | number | null): string | null =>
+  v !== null && v !== undefined ? v.toString() : null
 const toDate = (hex: bigint) => new Date(Number(hex) * 1000)
 
 export function transformData(block: Block, receipts: TransactionReceipt[]) {
@@ -148,8 +159,8 @@ export function transformData(block: Block, receipts: TransactionReceipt[]) {
       s: tx.s,
 
       type: tx.type ? Number(tx.type) : 0,
-      max_fee_per_gas: bigIntToStr(maxFeePerGas),
-      max_priority_fee_per_gas: bigIntToStr(maxPriorityFeePerGas),
+      max_fee_per_gas: bigIntToStrOrNull(maxFeePerGas),
+      max_priority_fee_per_gas: bigIntToStrOrNull(maxPriorityFeePerGas),
 
       contract_address: receipt.contractAddress ?? null,
       effective_gas_price: bigIntToStr(receipt.effectiveGasPrice),
