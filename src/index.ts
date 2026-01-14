@@ -12,7 +12,7 @@ const config = {
     password: process.env.POSTGRES_PASSWORD,
     user: process.env.POSTGRES_USER,
     database: process.env.POSTGRES_DB,
-    max: Number(process.env.POSTGRES_MAX_CONNECTIONS ?? 20),
+    max: Number(process.env.POSTGRES_MAX_CONNECTIONS ?? 4),
     idleTimeoutMillis: Number(process.env.IDLE_TIMEOUT ?? 30000),
     connectionTimeoutMillis: Number(process.env.CONNECTION_TIMEOUT ?? 2000),
   },
@@ -20,7 +20,7 @@ const config = {
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
   },
   queue: {
-    batchSize: BigInt(process.env.BATCH_SIZE ?? 50),
+    batchSize: BigInt(process.env.BATCH_SIZE ?? 20),
     leaseTTL: Number(process.env.LEASE_TTL ?? 300),
     minBlockNumber: BigInt(process.env.MIN_BLOCK_NUMBER ?? 24219023),
   },
