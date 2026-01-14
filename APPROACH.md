@@ -134,3 +134,12 @@ If count >= limit, rejects request.
 
 
 # How to read the code?
+
+1. index.ts `main()`
+2. Indexer.ts `start()`
+3. Queue.ts `addBatches()` `next()`
+4. Queue.ts `complete()` `fail()` `extendLease()`
+5. Queue.ts `seed()` `recoverZombies()` `extendLease()`
+6. Fetcher.ts `fetch() waitForToken()`
+7. Queue.ts `acquireToken()`
+8. Database.ts `save()`

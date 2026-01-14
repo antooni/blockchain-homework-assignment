@@ -13,23 +13,6 @@ export class Fetcher {
   ) {}
 
   /**
-   * Helper: Spins until a Rate Limit token is acquired.
-   * This handles the "Backoff" logic for the Rate Limiter specifically.
-   */
-  private async waitForToken() {
-    let allowed = false
-    while (!allowed) {
-      // Ask Redis: "Can I make 1 call?"
-      allowed = await this.queue.acquireToken(this.options.rpcCallsPerSecond)
-      if (!allowed) {
-        // If rejected, sleep for a random short interval (jitter) to desynchronize
-        const jitter = Math.floor(Math.random() * 200) + 50
-        await sleep(jitter)
-      }
-    }
-  }
-
-  /**
    * Fetches and transforms a single block with retry logic.
    * Retries handle transient network errors without failing the entire batch.
    */
@@ -94,6 +77,23 @@ export class Fetcher {
 
     // 3. Transform
     return transformData(block, receipts)
+  }
+
+  /**
+   * Helper: Spins until a Rate Limit token is acquired.
+   * This handles the "Backoff" logic for the Rate Limiter specifically.
+   */
+  private async waitForToken() {
+    let allowed = false
+    while (!allowed) {
+      // Ask Redis: "Can I make 1 call?"
+      allowed = await this.queue.acquireToken(this.options.rpcCallsPerSecond)
+      if (!allowed) {
+        // If rejected, sleep for a random short interval (jitter) to desynchronize
+        const jitter = Math.floor(Math.random() * 200) + 50
+        await sleep(jitter)
+      }
+    }
   }
 }
 

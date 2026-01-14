@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID } from 'crypto'
 import type Redis from 'ioredis'
 
 export class Queue {
@@ -15,7 +15,6 @@ export class Queue {
     private options: {
       batchSize: bigint
       leaseTTL: number
-      minBlockNumber: bigint
     },
   ) {
     // Register the Sliding Window Lua Script
@@ -65,13 +64,110 @@ export class Queue {
     })
   }
 
-  /**
-   * Rate Limiter: Sliding Window Log
-   * Checks if we can perform an RPC call within the global limit.
-   * @param limit Max requests per window (e.g., 50)
-   * @param windowMs Window size in milliseconds (e.g., 1000 for 1s)
-   * @returns true if allowed, false if rate limited
-   */
+  async addBatches(fromBlock: bigint, toBlock: bigint) {
+    const pipeline = this.client.pipeline()
+    for (let start = fromBlock; start <= toBlock; start += this.options.batchSize) {
+      let end = start + this.options.batchSize - 1n
+      if (end > toBlock) end = toBlock
+      const rangeStr = `${start}-${end}`
+      pipeline.rpush(this.Q_WORK, rangeStr)
+    }
+    await pipeline.exec()
+    console.log(
+      `📥 Added batches from ${fromBlock.toLocaleString()} to ${toBlock.toLocaleString()}`,
+    )
+  }
+
+  async next(): Promise<[bigint, bigint]> {
+    const rangeStr = await this.blockingClient.blmove(
+      this.Q_WORK,
+      this.Q_PROCESSING,
+      'LEFT',
+      'RIGHT',
+      0,
+    )
+    if (!rangeStr) throw new Error('Queue closed or empty')
+    const [from, to] = this.parseRange(rangeStr)
+    await this.client.set(`${this.LOCK_PREFIX}${rangeStr}`, '1', 'EX', this.options.leaseTTL)
+    return [from, to]
+  }
+
+  async complete(from: bigint, to: bigint) {
+    const rangeStr = `${from}-${to}`
+    const pipeline = this.client.pipeline()
+    pipeline.lrem(this.Q_PROCESSING, 1, rangeStr)
+    pipeline.del(`${this.LOCK_PREFIX}${rangeStr}`)
+    await pipeline.exec()
+
+    // Track the highest successfully processed block
+    await this.updateLastProcessed(to)
+  }
+
+  async fail(from: bigint, to: bigint) {
+    const rangeStr = `${from}-${to}`
+    const pipeline = this.client.pipeline()
+    pipeline.lrem(this.Q_PROCESSING, 1, rangeStr)
+    pipeline.del(`${this.LOCK_PREFIX}${rangeStr}`)
+    pipeline.rpush(this.Q_WORK, rangeStr)
+    await pipeline.exec()
+  }
+
+  async extendLease(from: bigint, to: bigint) {
+    const rangeStr = `${from}-${to}`
+    await this.client.expire(`${this.LOCK_PREFIX}${rangeStr}`, this.options.leaseTTL)
+  }
+
+  async seed(targetBlock: bigint) {
+    const [waiting, active] = await Promise.all([
+      this.client.llen(this.Q_WORK),
+      this.client.llen(this.Q_PROCESSING),
+    ])
+
+    if (waiting + active > 0) {
+      console.log(`🔄 Queue has work (${waiting} waiting, ${active} processing).`)
+    }
+
+    // Determine the starting point for new batches
+    // Use the highest of: lastQueued+1, lastIndexed+1, or 0
+    const lastQueued = await this.getLastQueued()
+
+    let start: bigint
+    if (lastQueued !== null) {
+      start = lastQueued + 1n
+    } else {
+      start = targetBlock - 1_000_000n
+    }
+
+    if (start > targetBlock) {
+      console.log('✅ All blocks up to target have been queued.')
+      return
+    }
+
+    console.log(`🌱 Adding queue ranges from Block ${start} to ${targetBlock}...`)
+    await this.addBatches(start, targetBlock)
+    await this.setLastQueued(targetBlock)
+  }
+
+  async recoverZombies() {
+    const processing = await this.client.lrange(this.Q_PROCESSING, 0, -1)
+    if (processing.length === 0) return
+    let recovered = 0
+    for (const rangeStr of processing) {
+      const isLocked = await this.client.exists(`${this.LOCK_PREFIX}${rangeStr}`)
+      if (!isLocked) {
+        console.warn(`🧟 Zombie detected: Range ${rangeStr}. Re-queueing...`)
+        const tx = this.client.multi()
+        tx.lrem(this.Q_PROCESSING, 1, rangeStr)
+        tx.rpush(this.Q_WORK, rangeStr)
+        await tx.exec()
+        recovered++
+      }
+    }
+    if (recovered > 0) {
+      console.log(`❤️  Janitor recovered ${recovered} ranges.`)
+    }
+  }
+
   async acquireToken(limit: number, windowMs = 1000): Promise<boolean> {
     const now = Date.now()
     const uniqueId = randomUUID() // Needed because ZADD requires unique members
@@ -123,109 +219,5 @@ export class Queue {
   async updateLastProcessed(block: bigint): Promise<void> {
     // @ts-ignore: ioredis adds dynamic methods based on defineCommand
     await this.client.updateLastProcessedIfHigher(this.LAST_PROCESSED_KEY, block.toString())
-  }
-
-  async addBatches(fromBlock: bigint, toBlock: bigint) {
-    const pipeline = this.client.pipeline()
-    for (let start = fromBlock; start <= toBlock; start += this.options.batchSize) {
-      let end = start + this.options.batchSize - 1n
-      if (end > toBlock) end = toBlock
-      const rangeStr = `${start}-${end}`
-      pipeline.rpush(this.Q_WORK, rangeStr)
-    }
-    await pipeline.exec()
-    console.log(
-      `📥 Added batches from ${fromBlock.toLocaleString()} to ${toBlock.toLocaleString()}`,
-    )
-  }
-
-  async seed(targetBlock: bigint) {
-    const [waiting, active] = await Promise.all([
-      this.client.llen(this.Q_WORK),
-      this.client.llen(this.Q_PROCESSING),
-    ])
-
-    if (waiting + active > 0) {
-      console.log(`🔄 Queue has work (${waiting} waiting, ${active} processing).`)
-    }
-
-    // Determine the starting point for new batches
-    // Use the highest of: lastQueued+1, lastIndexed+1, or 0
-    const lastQueued = await this.getLastQueued()
-
-    let start: bigint
-    if (lastQueued !== null) {
-      start = lastQueued + 1n
-    } else {
-      start = this.options.minBlockNumber
-    }
-
-    if (start > targetBlock) {
-      console.log('✅ All blocks up to target have been queued.')
-      return
-    }
-
-    console.log(`🌱 Adding queue ranges from Block ${start} to ${targetBlock}...`)
-    await this.addBatches(start, targetBlock)
-    await this.setLastQueued(targetBlock)
-  }
-
-  async next(): Promise<[bigint, bigint]> {
-    const rangeStr = await this.blockingClient.blmove(
-      this.Q_WORK,
-      this.Q_PROCESSING,
-      'LEFT',
-      'RIGHT',
-      0,
-    )
-    if (!rangeStr) throw new Error('Queue closed or empty')
-    const [from, to] = this.parseRange(rangeStr)
-    await this.client.set(`${this.LOCK_PREFIX}${rangeStr}`, '1', 'EX', this.options.leaseTTL)
-    return [from, to]
-  }
-
-  async extendLease(from: bigint, to: bigint) {
-    const rangeStr = `${from}-${to}`
-    await this.client.expire(`${this.LOCK_PREFIX}${rangeStr}`, this.options.leaseTTL)
-  }
-
-  async complete(from: bigint, to: bigint) {
-    const rangeStr = `${from}-${to}`
-    const pipeline = this.client.pipeline()
-    pipeline.lrem(this.Q_PROCESSING, 1, rangeStr)
-    pipeline.del(`${this.LOCK_PREFIX}${rangeStr}`)
-    await pipeline.exec()
-
-    // Track the highest successfully processed block
-    await this.updateLastProcessed(to)
-  }
-
-  async fail(from: bigint, to: bigint) {
-    const rangeStr = `${from}-${to}`
-    const pipeline = this.client.pipeline()
-    pipeline.lrem(this.Q_PROCESSING, 1, rangeStr)
-    pipeline.del(`${this.LOCK_PREFIX}${rangeStr}`)
-    pipeline.rpush(this.Q_WORK, rangeStr)
-    await pipeline.exec()
-  }
-
-  async recoverZombies() {
-    const processing = await this.client.lrange(this.Q_PROCESSING, 0, -1)
-    if (processing.length === 0) return
-    let recovered = 0
-    for (const rangeStr of processing) {
-      const isLocked = await this.client.exists(`${this.LOCK_PREFIX}${rangeStr}`)
-      if (!isLocked) {
-        console.warn(`🧟 Zombie detected: Range ${rangeStr}. Re-queueing...`)
-        const tx = this.client.multi()
-        tx.lrem(this.Q_PROCESSING, 1, rangeStr)
-        tx.rpush(this.Q_WORK, rangeStr)
-        await tx.exec()
-        recovered++
-      }
-    }
-    if (recovered > 0) {
-      console.log(`❤️  Janitor recovered ${recovered} ranges.`)
-    }
   }
 }

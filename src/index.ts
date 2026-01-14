@@ -22,7 +22,6 @@ const config = {
   queue: {
     batchSize: BigInt(process.env.BATCH_SIZE ?? 20),
     leaseTTL: Number(process.env.LEASE_TTL ?? 300),
-    minBlockNumber: BigInt(process.env.MIN_BLOCK_NUMBER ?? 24219023),
   },
   rpc: {
     callsPerSecond: Number(process.env.RPC_CALLS_PER_SECOND ?? 50),
@@ -48,7 +47,6 @@ async function main() {
   const queue = new Queue(redisClient, redisBlockingClient, {
     batchSize: config.queue.batchSize,
     leaseTTL: config.queue.leaseTTL,
-    minBlockNumber: config.queue.minBlockNumber,
   })
 
   const tip = await rpcClient.getBlockNumber()
@@ -75,7 +73,6 @@ async function main() {
         queueOptions: {
           batchSize: config.queue.batchSize.toString(),
           leaseTTL: config.queue.leaseTTL,
-          minBlockNumber: config.queue.minBlockNumber,
         },
         indexerOptions: {
           maxRetries: config.rpc.maxRetries,

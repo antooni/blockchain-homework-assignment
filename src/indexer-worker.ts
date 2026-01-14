@@ -20,7 +20,6 @@ interface WorkerConfig {
   queueOptions: {
     batchSize: string
     leaseTTL: number
-    minBlockNumber: bigint
   }
   indexerOptions: {
     maxRetries: number
@@ -59,7 +58,6 @@ async function runWorker() {
   const queue = new Queue(redisClient, redisBlockingClient, {
     batchSize: BigInt(config.queueOptions.batchSize),
     leaseTTL: config.queueOptions.leaseTTL,
-    minBlockNumber: config.queueOptions.minBlockNumber,
   })
 
   const fetcher = new Fetcher(rpcClient, queue, {
