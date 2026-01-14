@@ -1,4 +1,7 @@
 // Type alias for fields stored as NUMERIC or BIGINT in Postgres
+
+import type { TransactionReceipt } from 'viem'
+
 // We handle them as strings in JS to preserve 256-bit precision.
 type StringNumber = string
 
@@ -100,4 +103,10 @@ export interface LogRecord {
   topic1: string | null
   topic2: string | null
   topic3: string | null
+}
+
+export type GetBlockReceiptsSchema = {
+  Method: 'eth_getBlockReceipts'
+  Parameters: [string]
+  ReturnType: TransactionReceipt[]
 }

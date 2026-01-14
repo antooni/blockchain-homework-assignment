@@ -1,5 +1,27 @@
-import type { Block, Transaction, TransactionReceipt } from 'viem'
-import type { BlockRecord, LogRecord, TransactionRecord } from './types'
+import { type Block, type Client, type Transaction, type TransactionReceipt, toHex } from 'viem'
+import type { BlockRecord, GetBlockReceiptsSchema, LogRecord, TransactionRecord } from './types'
+
+export class Fetcher {
+  constructor(private client: Client) {}
+
+  async fetch(blockNumber: bigint) {
+    const [block, receipts] = await Promise.all([
+      this.client.request({
+        method: 'eth_getBlockByNumber',
+        params: [toHex(blockNumber), true],
+      }) as Promise<Block>,
+
+      this.client.request<GetBlockReceiptsSchema>({
+        method: 'eth_getBlockReceipts',
+        params: [toHex(blockNumber)],
+      }) as Promise<TransactionReceipt[]>,
+    ])
+
+    if (!block) throw new Error(`Block ${blockNumber} not found`)
+
+    return transformData(block, receipts)
+  }
+}
 
 // biome-ignore lint: we do not handle pending blocks
 const bigIntToStr = (v: bigint | number | null) => v!.toString()
@@ -8,7 +30,6 @@ const toDate = (hex: bigint) => new Date(Number(hex) * 1000)
 export function transformData(block: Block, receipts: TransactionReceipt[]) {
   assert(block.hash && block.nonce && block.logsBloom)
 
-  // 1. Map Block
   const blockRecord: BlockRecord = {
     number: bigIntToStr(block.number),
     hash: block.hash,
@@ -29,13 +50,11 @@ export function transformData(block: Block, receipts: TransactionReceipt[]) {
     logs_bloom: block.logsBloom,
   }
 
-  // Create a Map for fast Receipt lookup by Tx Hash
   const receiptMap = new Map(receipts.map((r) => [r.transactionHash, r]))
 
   const txRecords: TransactionRecord[] = []
   const logRecords: LogRecord[] = []
 
-  // 2. Iterate Transactions and Merge with Receipts
   for (const tx of block.transactions as Transaction[]) {
     const receipt = receiptMap.get(tx.hash)
     if (!receipt) throw new Error(`Missing receipt for tx ${tx.hash}`)
@@ -43,7 +62,6 @@ export function transformData(block: Block, receipts: TransactionReceipt[]) {
     const maxFeePerGas = 'maxFeePerGas' in tx ? tx.maxFeePerGas : null
     const maxPriorityFeePerGas = 'maxPriorityFeePerGas' in tx ? tx.maxPriorityFeePerGas : null
 
-    // Transform Transaction
     txRecords.push({
       hash: tx.hash,
       nonce: bigIntToStr(tx.nonce),
@@ -60,20 +78,17 @@ export function transformData(block: Block, receipts: TransactionReceipt[]) {
       r: tx.r,
       s: tx.s,
 
-      // Fields from Receipt / EIP-1559
       type: tx.type ? Number(tx.type) : 0,
       max_fee_per_gas: maxFeePerGas?.toString() ?? null,
       max_priority_fee_per_gas: maxPriorityFeePerGas?.toString() ?? null,
 
-      // Receipt Merging
       contract_address: receipt.contractAddress ?? null,
       effective_gas_price: bigIntToStr(receipt.effectiveGasPrice),
       receipt_status: Number(receipt.status),
       cumulative_gas_used: bigIntToStr(receipt.cumulativeGasUsed),
-      block_timestamp: toDate(block.timestamp), // Denormalized time
+      block_timestamp: toDate(block.timestamp),
     })
 
-    // 3. Transform Logs (Flattened from Receipt)
     for (const log of receipt.logs) {
       logRecords.push({
         transaction_hash: log.transactionHash,

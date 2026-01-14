@@ -31,13 +31,11 @@
 
 ### Critical DB operation: batch insert
 - "Idempotent Batch Insert" (simplified version that does nothing on conflict) ```INSERT INTO t VALUES (A), (B), (C) ON CONFLICT DO NOTHING``` 
-
-- avoid parameter limit in a single query (~ 65k): split into chunks & ensure it happens inside one  DB transaction
+- avoid parameter limit in a single query (~ 65k): UNNEST, split into chunks & ensure it happens inside one  DB transaction
 
 ### Connection pool
 - PostgreSQL is process-based, not thread-based; every connection spawns a heavy OS process
 - small number of active connections executing queries very quickly, not a large number of connections waiting
-- conservative homework calculations (4 clients x 5 connections x 100 TPS = 2000 writes/s)
 
 ### Index Overhead
 - every write updates indexes, add only crucial ones
@@ -133,3 +131,6 @@ If count >= limit, rejects request.
 
 - happy path: on system restart, the Redis queue preserves the order
 - disaster path (out of homework scope): if Redis data is lost, a "Startup Reconciliation" script would query Postgres (MAX(block)) to re-seed the queue from the last checkpoint, it should also look for the gaps in data. Assumption is that it would be run on edge cases so this is fine the gap-finding query could potentially take longer time.
+
+
+# How to read the code?
